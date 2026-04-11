@@ -15,6 +15,9 @@ using namespace Gdiplus;
 #include <vector>
 #include <shellapi.h>
 
+// target maximum display dimension for skins (shrink-to)
+#define SKIN_DISPLAY_MAX 150
+
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -186,7 +189,7 @@ BOOL CqieDlg::OnInitDialog()
 						int origW = (int)m_pBitmap->GetWidth();
 						int origH = (int)m_pBitmap->GetHeight();
                         // compute scale to limit maximum size
-						const int MAX_DIM = 300; // max width/height to display (reduced)
+						const int MAX_DIM = SKIN_DISPLAY_MAX; // max width/height to display (reduced)
 						double scale = 1.0;
 						if (origW > MAX_DIM || origH > MAX_DIM)
 						{
@@ -600,9 +603,9 @@ void CqieDlg::OnSkinChange(UINT nID)
 
 	if (m_pBitmap && m_pBitmap->GetLastStatus() == Ok)
 	{
-		int origW = (int)m_pBitmap->GetWidth();
+        int origW = (int)m_pBitmap->GetWidth();
 		int origH = (int)m_pBitmap->GetHeight();
-		const int MAX_DIM = 300;
+		const int MAX_DIM = SKIN_DISPLAY_MAX;
 		double scale = 1.0;
 		if (origW > MAX_DIM || origH > MAX_DIM)
 		{
