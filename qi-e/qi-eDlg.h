@@ -10,6 +10,8 @@
 #define IDC_TRAY_RESTORE 40001
 #define IDC_TRAY_HIDE    40002
 #define IDC_EXE_EXIT     40003
+// base id for dynamic skin menu items
+#define IDC_SKIN_BASE    50000
 
 
 // CqieDlg 对话框
@@ -51,6 +53,12 @@ protected:
     // tray
 	int m_trayID;
 	bool m_trayAdded;
+
+	// available external skin files (full paths)
+	std::vector<CString> m_skinFiles;
+
+	// handler for dynamic skin menu commands
+	afx_msg void OnSkinChange(UINT nID);
 	void AddTrayIcon();
 	void RemoveTrayIcon();
 	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);

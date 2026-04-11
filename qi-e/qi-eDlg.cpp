@@ -88,6 +88,7 @@ BEGIN_MESSAGE_MAP(CqieDlg, CDialogEx)
 	ON_COMMAND(IDC_TRAY_RESTORE, &CqieDlg::OnMenuRestore)
 	ON_COMMAND(IDC_TRAY_HIDE, &CqieDlg::OnMenuHideTray)
 	ON_COMMAND(IDC_EXE_EXIT, &CqieDlg::OnMenuExit)
+   ON_COMMAND_RANGE(IDC_SKIN_BASE, IDC_SKIN_BASE+1000, &CqieDlg::OnSkinChange)
 END_MESSAGE_MAP()
 
 
@@ -115,6 +116,28 @@ BOOL CqieDlg::OnInitDialog()
 			pSysMenu->AppendMenu(MF_SEPARATOR);
 			pSysMenu->AppendMenu(MF_STRING, IDM_ABOUTBOX, strAboutMenu);
 		}
+
+	// scan skins directory next to exe
+	wchar_t buf[MAX_PATH];
+	if (GetModuleFileNameW(NULL, buf, MAX_PATH))
+	{
+		CString exePath(buf);
+		int pos = exePath.ReverseFind(L'\\');
+		CString exeDir = exePath.Left(pos);
+		CString skinsDir = exeDir + L"\\skins";
+		WIN32_FIND_DATA fd;
+		CString pattern = skinsDir + L"\\*.png";
+		HANDLE h = FindFirstFile(pattern, &fd);
+		if (h != INVALID_HANDLE_VALUE)
+		{
+			do
+			{
+				CString f = skinsDir + L"\\" + fd.cFileName;
+				m_skinFiles.push_back(f);
+			} while (FindNextFile(h, &fd));
+			FindClose(h);
+		}
+	}
 	}
 
 	// 设置此对话框的图标。  当应用程序主窗口不是对话框时，框架将自动
@@ -473,6 +496,22 @@ void CqieDlg::OnRButtonUp(UINT nFlags, CPoint point)
     CMenu menu;
 	menu.CreatePopupMenu();
 	menu.AppendMenu(MF_STRING, IDC_TRAY_HIDE, L"隐藏到托盘");
+
+	// add skins submenu if external skins found
+	if (!m_skinFiles.empty())
+	{
+		CMenu skinMenu;
+		skinMenu.CreatePopupMenu();
+		for (size_t i = 0; i < m_skinFiles.size() && i < 1000; ++i)
+		{
+			CString full = m_skinFiles[i];
+			int p = full.ReverseFind(L'\\');
+			CString name = (p >= 0) ? full.Mid(p+1) : full;
+			skinMenu.AppendMenu(MF_STRING, IDC_SKIN_BASE + (UINT)i, name);
+		}
+		menu.AppendMenu(MF_POPUP, (UINT_PTR)skinMenu.GetSafeHmenu(), L"换肤");
+	}
+
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, IDC_EXE_EXIT, L"退出");
 
@@ -524,6 +563,60 @@ void CqieDlg::OnMenuRestore()
 void CqieDlg::OnMenuExit()
 {
 	PostMessage(WM_CLOSE);
+}
+
+void CqieDlg::OnSkinChange(UINT nID)
+{
+	int idx = nID - IDC_SKIN_BASE;
+	if (idx < 0 || idx >= (int)m_skinFiles.size()) return;
+	CString path = m_skinFiles[idx];
+
+	// load selected PNG into m_pBitmap
+	// free old
+	if (m_pBitmap) { delete m_pBitmap; m_pBitmap = nullptr; }
+
+	// open file as IStream
+	FILE* f = nullptr;
+	_wfopen_s(&f, path, L"rb");
+	if (!f) return;
+	fseek(f, 0, SEEK_END);
+	long size = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+	if (!hMem) { fclose(f); return; }
+	void* p = GlobalLock(hMem);
+	if (p) fread(p, 1, size, f);
+	GlobalUnlock(hMem);
+	fclose(f);
+
+	IStream* pStream = nullptr;
+	if (SUCCEEDED(CreateStreamOnHGlobal(hMem, TRUE, &pStream)) && pStream)
+	{
+		LARGE_INTEGER li = {0};
+		pStream->Seek(li, STREAM_SEEK_SET, NULL);
+		m_pBitmap = Bitmap::FromStream(pStream);
+		pStream->Release();
+	}
+
+	if (m_pBitmap && m_pBitmap->GetLastStatus() == Ok)
+	{
+		int origW = (int)m_pBitmap->GetWidth();
+		int origH = (int)m_pBitmap->GetHeight();
+		const int MAX_DIM = 300;
+		double scale = 1.0;
+		if (origW > MAX_DIM || origH > MAX_DIM)
+		{
+			double sx = (double)MAX_DIM / origW;
+			double sy = (double)MAX_DIM / origH;
+			scale = min(sx, sy);
+		}
+		const double FORCE_FACTOR = 1.0/3.0;
+		scale = min(scale, FORCE_FACTOR);
+		m_imgWidth = max(1, (int)floor(origW * scale + 0.5));
+		m_imgHeight = max(1, (int)floor(origH * scale + 0.5));
+		SetWindowPos(nullptr, 0,0, m_imgWidth, m_imgHeight, SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
+		ShowLayered();
+	}
 }
 
 void CqieDlg::OnSysCommand(UINT nID, LPARAM lParam)
