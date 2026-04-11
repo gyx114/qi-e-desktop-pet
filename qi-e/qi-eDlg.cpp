@@ -15,10 +15,14 @@ using namespace Gdiplus;
 // for CreateStreamOnHGlobal / IStream
 #include <objidl.h>
 #include <vector>
+#include <deque>
+#include <utility>
 #include <shellapi.h>
 
 // target maximum display dimension for skins (shrink-to)
 #define SKIN_DISPLAY_MAX 150
+
+
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -48,6 +52,80 @@ protected:
 CAboutDlg::CAboutDlg() : CDialogEx(IDD_ABOUTBOX)
 {
 }
+
+void CqieDlg::CheckForShake()
+{
+    // Improved shake detection tuned for human-like shakes:
+	// - requires enough samples
+	// - requires several rapid left/right reversals (frequency)
+	// - requires sufficient average horizontal velocity (to ignore slow moves)
+	// - allows some vertical movement
+
+	const size_t MIN_SAMPLES = 6;
+	const double VEL_THRESHOLD = 0.18; // px per ms (~180 px/s)
+	const int MIN_DIRECTION_CHANGES = 4; // require several reversals
+	const double MIN_FREQ_HZ = 1.8; // minimum oscillation frequency
+	const int MAX_TOTAL_MOVE = 1000; // if user drags across huge distance, ignore
+
+	if (m_moveHistory.size() < MIN_SAMPLES) return;
+
+	// extract times and x positions
+	std::vector<ULONGLONG> times;
+	std::vector<int> xs;
+	times.reserve(m_moveHistory.size()); xs.reserve(m_moveHistory.size());
+	for (auto &p : m_moveHistory) { times.push_back(p.first); xs.push_back(p.second.x); }
+
+	ULONGLONG t0 = times.front();
+	ULONGLONG tn = times.back();
+	double totalMs = (double)(tn - t0);
+	if (totalMs < 50.0) return; // too short to analyze
+
+	// compute per-sample horizontal deltas and velocities
+	int dirChanges = 0;
+	int prevSign = 0;
+	double totalAbsDx = 0.0;
+	double peakV = 0.0;
+	for (size_t i = 1; i < xs.size(); ++i)
+	{
+		double dt = (double)(times[i] - times[i-1]);
+		if (dt <= 0.0) continue;
+		double dx = (double)(xs[i] - xs[i-1]);
+		double vx = dx / dt; // px per ms
+		totalAbsDx += fabs(dx);
+		peakV = max(peakV, fabs(vx));
+		int sign = (vx > VEL_THRESHOLD) ? 1 : ( (vx < -VEL_THRESHOLD) ? -1 : 0 );
+		if (sign != 0)
+		{
+			if (prevSign == 0) prevSign = sign;
+			else if (sign != prevSign)
+			{
+				++dirChanges;
+				prevSign = sign;
+			}
+		}
+	}
+
+	double avgAbsV = (totalMs > 0.0) ? (totalAbsDx / totalMs) : 0.0; // px per ms
+
+	// estimate oscillation frequency (half-cycles = dirChanges)
+	double freqHz = (totalMs > 0.0) ? ( (double)dirChanges / (totalMs/1000.0) ) : 0.0;
+
+	// ignore very large drags (user is moving window across screen)
+	int netMove = abs(xs.back() - xs.front());
+	if (netMove > MAX_TOTAL_MOVE) return;
+
+	// criteria: enough direction changes, sufficient average velocity or peak velocity, and frequency
+	if (dirChanges >= MIN_DIRECTION_CHANGES && (avgAbsV >= VEL_THRESHOLD || peakV >= VEL_THRESHOLD) && freqHz >= MIN_FREQ_HZ)
+	{
+		ULONGLONG now = GetTickCount64();
+		if (now - m_lastShakeTime < 2000) return; // debounce 2s
+		m_lastShakeTime = now;
+		OnSkinRandom();
+		m_moveHistory.clear();
+	}
+}
+
+// OnTimer removed: timer-based shake animation and GWLP_USERDATA state are deleted
 
 void CqieDlg::LoadSkinFromFile(const CString& path)
 {
@@ -107,6 +185,8 @@ void CqieDlg::OnSkinRandom()
 	LoadSkinFromFile(chosen);
 }
 
+// OnShakeRandom removed: UI-timer based shake animation and delayed load are deleted.
+
 void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
@@ -131,6 +211,8 @@ CqieDlg::CqieDlg(CWnd* pParent /*=nullptr*/)
 	m_dragging = false;
     m_trayAdded = false;
 	m_trayID = 1000;
+    m_lastShakeTime = 0;
+	m_moveHistory.clear();
 }
 
 void CqieDlg::DoDataExchange(CDataExchange* pDX)
@@ -146,12 +228,12 @@ BEGIN_MESSAGE_MAP(CqieDlg, CDialogEx)
 	ON_WM_LBUTTONUP()
 	ON_WM_MOUSEMOVE()
     ON_WM_RBUTTONUP()
-	ON_WM_DESTROY()
+    ON_WM_DESTROY()
     ON_MESSAGE(WM_TRAYICON, &CqieDlg::OnTrayIcon)
 	ON_COMMAND(IDC_TRAY_RESTORE, &CqieDlg::OnMenuRestore)
 	ON_COMMAND(IDC_TRAY_HIDE, &CqieDlg::OnMenuHideTray)
   ON_COMMAND(IDC_EXE_EXIT, &CqieDlg::OnMenuExit)
-	ON_COMMAND(IDC_SKIN_RANDOM, &CqieDlg::OnSkinRandom)
+    ON_COMMAND(IDC_SKIN_RANDOM, &CqieDlg::OnSkinRandom)
 	ON_COMMAND_RANGE(IDC_SKIN_BASE, IDC_SKIN_BASE+1000, &CqieDlg::OnSkinChange)
 END_MESSAGE_MAP()
 
@@ -490,7 +572,9 @@ void CqieDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		m_dragging = false;
 		ReleaseCapture();
 	}
-	CDialogEx::OnLButtonUp(nFlags, point);
+    CDialogEx::OnLButtonUp(nFlags, point);
+	// after drag ends, record position and check for shake
+	CheckForShake();
 }
 
 void CqieDlg::OnMouseMove(UINT nFlags, CPoint point)
@@ -502,7 +586,22 @@ void CqieDlg::OnMouseMove(UINT nFlags, CPoint point)
 		CPoint topleft = ptScreen - m_dragOffset;
 		SetWindowPos(NULL, topleft.x, topleft.y, 0,0, SWP_NOZORDER|SWP_NOSIZE|SWP_NOACTIVATE);
 	}
-	CDialogEx::OnMouseMove(nFlags, point);
+    CDialogEx::OnMouseMove(nFlags, point);
+	// while dragging, log positions for shake detection
+	if (m_dragging)
+	{
+		ULONGLONG now = GetTickCount64();
+		CPoint tl;
+		CRect rc; GetWindowRect(&rc); tl = rc.TopLeft();
+		// push to history
+		m_moveHistory.emplace_back(now, tl);
+		// prune older than 800ms
+		while (!m_moveHistory.empty() && now - m_moveHistory.front().first > 800)
+			m_moveHistory.pop_front();
+
+		// check for shake gesture while dragging (trigger immediate random skin)
+		CheckForShake();
+	}
 }
 
 void CqieDlg::OnDestroy()
@@ -511,6 +610,7 @@ void CqieDlg::OnDestroy()
     RemoveTrayIcon();
 	if (m_pBitmap) { delete m_pBitmap; m_pBitmap = nullptr; }
 	m_alphaMask.clear();
+    m_moveHistory.clear();
 	if (m_gdiplusToken)
 	{
 		GdiplusShutdown(m_gdiplusToken);

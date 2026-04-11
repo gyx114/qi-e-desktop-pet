@@ -5,6 +5,11 @@
 #pragma once
 
 #include <vector>
+#include <deque>
+#include <utility>
+
+// forward declare GDI+ Bitmap to avoid heavy include in header
+namespace Gdiplus { class Bitmap; }
 
 #define WM_TRAYICON (WM_USER + 1)
 #define IDC_TRAY_RESTORE 40001
@@ -65,6 +70,16 @@ protected:
 	afx_msg void OnSkinChange(UINT nID);
 	// random skin
 	afx_msg void OnSkinRandom();
+
+    // timer handler (not used for shake animation anymore)
+	// (OnTimer removed - kept for potential future use)
+
+	// user-drag move history for shake detection: pair<timestamp(ms), top-left point>
+	std::deque<std::pair<ULONGLONG, CPoint>> m_moveHistory;
+	ULONGLONG m_lastShakeTime;
+
+	// check move history for shake gesture
+	void CheckForShake();
 
 	// load skin helper
 	void LoadSkinFromFile(const CString& path);
