@@ -216,7 +216,7 @@ BOOL CqieDlg::OnInitDialog()
 
 	// Change window style to popup layered and topmost
 	LONG ex = GetWindowLong(m_hWnd, GWL_EXSTYLE);
-	ex |= WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
+ ex |= WS_EX_LAYERED | WS_EX_TOOLWINDOW;
 	SetWindowLong(m_hWnd, GWL_EXSTYLE, ex);
 
 	// Remove caption and borders so layered window has only client area (no title bar)
@@ -224,7 +224,9 @@ BOOL CqieDlg::OnInitDialog()
 	style &= ~(WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_BORDER);
 	style |= WS_POPUP;
 	SetWindowLong(m_hWnd, GWL_STYLE, style);
-	SetWindowPos(NULL, 0,0,0,0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(NULL, 0,0,0,0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	// ensure window is topmost
+	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0,0,0,0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
     // load image from embedded PNG resource IDB_PNG1
 	HRSRC hRes = FindResource(AfxGetInstanceHandle(), MAKEINTRESOURCE(IDB_PNG1), L"PNG");
@@ -583,13 +585,14 @@ LRESULT CqieDlg::OnTrayIcon(WPARAM wParam, LPARAM lParam)
 {
     if ((int)wParam == m_trayID)
 	{
-		if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP)
+		// show tray menu only on right-click
+		if (lParam == WM_RBUTTONUP)
 		{
 			CPoint pt;
 			GetCursorPos(&pt);
-            CMenu menu;
+			CMenu menu;
 			menu.CreatePopupMenu();
-            menu.AppendMenu(MF_STRING, IDC_TRAY_RESTORE, L"显示");
+			menu.AppendMenu(MF_STRING, IDC_TRAY_RESTORE, L"显示");
 			menu.AppendMenu(MF_SEPARATOR, 0, (LPCTSTR)NULL);
 			menu.AppendMenu(MF_STRING, IDC_EXE_EXIT, L"退出");
 			SetForegroundWindow();
