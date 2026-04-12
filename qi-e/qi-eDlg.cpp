@@ -53,6 +53,32 @@ CAboutDlg::CAboutDlg() : CDialogEx(IDD_ABOUTBOX)
 {
 }
 
+void CqieDlg::SetAutoStart(bool enable)
+{
+	if (enable)
+	{
+		WCHAR exePath[MAX_PATH];
+		if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
+		{
+			HKEY hk;
+			if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hk) == ERROR_SUCCESS)
+			{
+				RegSetValueExW(hk, L"qi-e", 0, REG_SZ, (const BYTE*)exePath, (DWORD)((wcslen(exePath)+1)*sizeof(WCHAR)));
+				RegCloseKey(hk);
+			}
+		}
+	}
+	else
+	{
+		HKEY hk;
+		if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hk) == ERROR_SUCCESS)
+		{
+			RegDeleteValueW(hk, L"qi-e");
+			RegCloseKey(hk);
+		}
+	}
+}
+
 void CqieDlg::CheckForShake()
 {
     // Improved shake detection tuned for human-like shakes:
@@ -103,6 +129,7 @@ void CqieDlg::CheckForShake()
 				prevSign = sign;
 			}
 		}
+
 	}
 
 	double avgAbsV = (totalMs > 0.0) ? (totalAbsDx / totalMs) : 0.0; // px per ms
@@ -234,6 +261,7 @@ BEGIN_MESSAGE_MAP(CqieDlg, CDialogEx)
 	ON_COMMAND(IDC_TRAY_HIDE, &CqieDlg::OnMenuHideTray)
   ON_COMMAND(IDC_EXE_EXIT, &CqieDlg::OnMenuExit)
     ON_COMMAND(IDC_SKIN_RANDOM, &CqieDlg::OnSkinRandom)
+    ON_COMMAND(IDC_STARTUP_TOGGLE, &CqieDlg::OnToggleStartup)
 	ON_COMMAND_RANGE(IDC_SKIN_BASE, IDC_SKIN_BASE+1000, &CqieDlg::OnSkinChange)
 END_MESSAGE_MAP()
 
@@ -283,6 +311,27 @@ BOOL CqieDlg::OnInitDialog()
 			} while (FindNextFile(h, &fd));
 			FindClose(h);
 		}
+	}
+
+	// determine first run / default autostart: if Run key doesn't contain our entry, enable it and mark firstRun
+	bool firstRun = false;
+	HKEY hKeyTest = NULL;
+	if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKeyTest) == ERROR_SUCCESS)
+	{
+		WCHAR val[MAX_PATH]; DWORD cb = sizeof(val);
+		if (RegQueryValueExW(hKeyTest, L"qi-e", NULL, NULL, (LPBYTE)val, &cb) != ERROR_SUCCESS)
+		{
+			firstRun = true;
+		}
+		RegCloseKey(hKeyTest);
+	}
+	else
+	{
+		firstRun = true;
+	}
+	if (firstRun)
+	{
+		SetAutoStart(true);
 	}
 	}
 
@@ -355,8 +404,13 @@ BOOL CqieDlg::OnInitDialog()
 						m_pBitmap->GetPixel(origW/2, origH/2, &sample);
 						TRACE("sample alpha at center = %d\n", sample.GetA());
 
-						// Resize window to image size
-						SetWindowPos(nullptr, 100, 100, m_imgWidth, m_imgHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+                        // Resize window to image size and position at right-middle of primary screen on first show
+						int scrW = GetSystemMetrics(SM_CXSCREEN);
+						int scrH = GetSystemMetrics(SM_CYSCREEN);
+						const int RIGHT_MARGIN = 16;
+						int posX = max(0, scrW - m_imgWidth - RIGHT_MARGIN);
+						int posY = max(0, (scrH - m_imgHeight) / 2);
+						SetWindowPos(nullptr, posX, posY, m_imgWidth, m_imgHeight, SWP_NOZORDER | SWP_NOACTIVATE);
 						ShowLayered();
 					}
 				}
@@ -668,6 +722,23 @@ void CqieDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		menu.AppendMenu(MF_STRING, IDC_SKIN_RANDOM, L"换肤");
 	}
 
+	// startup toggle
+	BOOL autoRun = FALSE;
+	HKEY hKey = NULL;
+	if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+	{
+		WCHAR exePath[MAX_PATH];
+		if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
+		{
+			WCHAR val[MAX_PATH];
+			DWORD cb = sizeof(val);
+			if (RegQueryValueExW(hKey, L"qi-e", NULL, NULL, (LPBYTE)val, &cb) == ERROR_SUCCESS)
+				autoRun = TRUE;
+		}
+		RegCloseKey(hKey);
+	}
+	menu.AppendMenu(autoRun ? MF_STRING : MF_STRING, 40010, autoRun ? L"取消开机自启动" : L"开机自启动");
+
     // skins listing removed from menu (logic retained)
 
 	menu.AppendMenu(MF_SEPARATOR);
@@ -679,6 +750,44 @@ void CqieDlg::OnRButtonUp(UINT nFlags, CPoint point)
 	menu.TrackPopupMenu(TPM_RIGHTBUTTON, screenPt.x, screenPt.y, this);
 
 	CDialogEx::OnRButtonUp(nFlags, point);
+}
+
+void CqieDlg::OnToggleStartup()
+{
+	// read current state
+	HKEY hKey = NULL;
+	bool enabled = false;
+	if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+	{
+		WCHAR val[MAX_PATH]; DWORD cb = sizeof(val);
+		if (RegQueryValueExW(hKey, L"qi-e", NULL, NULL, (LPBYTE)val, &cb) == ERROR_SUCCESS)
+			enabled = true;
+		RegCloseKey(hKey);
+	}
+
+	// toggle
+	if (!enabled)
+	{
+		WCHAR exePath[MAX_PATH];
+		if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
+		{
+			HKEY hk;
+			if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hk) == ERROR_SUCCESS)
+			{
+				RegSetValueExW(hk, L"qi-e", 0, REG_SZ, (const BYTE*)exePath, (DWORD)((wcslen(exePath)+1)*sizeof(WCHAR)));
+				RegCloseKey(hk);
+			}
+		}
+	}
+	else
+	{
+		HKEY hk;
+		if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hk) == ERROR_SUCCESS)
+		{
+			RegDeleteValueW(hk, L"qi-e");
+			RegCloseKey(hk);
+		}
+	}
 }
 
 LRESULT CqieDlg::OnTrayIcon(WPARAM wParam, LPARAM lParam)

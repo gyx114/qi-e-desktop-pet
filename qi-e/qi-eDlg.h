@@ -15,6 +15,8 @@ namespace Gdiplus { class Bitmap; }
 #define IDC_TRAY_RESTORE 40001
 #define IDC_TRAY_HIDE    40002
 #define IDC_EXE_EXIT     40003
+// id for startup toggle
+#define IDC_STARTUP_TOGGLE 40010
 // id for random skin action
 #define IDC_SKIN_RANDOM  49999
 // base id for dynamic skin menu items
@@ -83,10 +85,14 @@ protected:
 
 	// load skin helper
 	void LoadSkinFromFile(const CString& path);
+
+	// enable or disable run-on-startup (writes HKCU Run key)
+	void SetAutoStart(bool enable);
 	void AddTrayIcon();
 	void RemoveTrayIcon();
 	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 	afx_msg LRESULT OnTrayIcon(WPARAM wParam, LPARAM lParam);
+  afx_msg void OnToggleStartup();
 	afx_msg void OnMenuHideTray();
 	afx_msg void OnMenuRestore();
 	afx_msg void OnMenuExit();
