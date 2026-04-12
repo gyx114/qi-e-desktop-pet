@@ -53,6 +53,40 @@ CAboutDlg::CAboutDlg() : CDialogEx(IDD_ABOUTBOX)
 {
 }
 
+void CqieDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
+{
+	// simulate Ctrl+Alt+Space
+	// send input sequence: keydown Ctrl, keydown Alt, keydown Space, keyup Space, keyup Alt, keyup Ctrl
+	INPUT inputs[6];
+	ZeroMemory(inputs, sizeof(inputs));
+	// Ctrl down
+	inputs[0].type = INPUT_KEYBOARD;
+	inputs[0].ki.wVk = VK_CONTROL;
+	// Alt down
+	inputs[1].type = INPUT_KEYBOARD;
+	inputs[1].ki.wVk = VK_MENU;
+	// Space down
+	inputs[2].type = INPUT_KEYBOARD;
+	inputs[2].ki.wVk = VK_SPACE;
+	// Space up
+	inputs[3].type = INPUT_KEYBOARD;
+	inputs[3].ki.wVk = VK_SPACE;
+	inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+	// Alt up
+	inputs[4].type = INPUT_KEYBOARD;
+	inputs[4].ki.wVk = VK_MENU;
+	inputs[4].ki.dwFlags = KEYEVENTF_KEYUP;
+	// Ctrl up
+	inputs[5].type = INPUT_KEYBOARD;
+	inputs[5].ki.wVk = VK_CONTROL;
+	inputs[5].ki.dwFlags = KEYEVENTF_KEYUP;
+
+	// send
+	SendInput(_countof(inputs), inputs, sizeof(INPUT));
+
+	CDialogEx::OnLButtonDblClk(nFlags, point);
+}
+
 void CqieDlg::SetAutoStart(bool enable)
 {
 	if (enable)
@@ -256,6 +290,7 @@ BEGIN_MESSAGE_MAP(CqieDlg, CDialogEx)
 	ON_WM_MOUSEMOVE()
     ON_WM_RBUTTONUP()
     ON_WM_DESTROY()
+    ON_WM_LBUTTONDBLCLK()
     ON_MESSAGE(WM_TRAYICON, &CqieDlg::OnTrayIcon)
 	ON_COMMAND(IDC_TRAY_RESTORE, &CqieDlg::OnMenuRestore)
 	ON_COMMAND(IDC_TRAY_HIDE, &CqieDlg::OnMenuHideTray)
