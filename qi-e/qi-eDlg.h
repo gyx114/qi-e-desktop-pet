@@ -21,6 +21,11 @@ namespace Gdiplus { class Bitmap; }
 #define IDC_SKIN_RANDOM  49999
 // base id for dynamic skin menu items
 #define IDC_SKIN_BASE    50000
+// program action id ranges
+#define IDC_PROG_DELETE_BASE 53000
+#define IDC_PROG_RENAME_BASE 54000
+// base id for program open actions
+#define IDC_PROG_OPEN_BASE 56000
 
 
 // CqieDlg 对话框
@@ -68,6 +73,13 @@ protected:
 	// skins directory path
 	CString m_skinsDir;
 
+	// path to settings INI in exe dir
+	CString m_settingsPath;
+
+	// load/save settings.ini in exe directory
+	void LoadSettings();
+	void SaveDefaultSettings();
+
 	// handler for dynamic skin menu commands
 	afx_msg void OnSkinChange(UINT nID);
 	// random skin
@@ -88,11 +100,22 @@ protected:
 
 	// enable or disable run-on-startup (writes HKCU Run key)
 	void SetAutoStart(bool enable);
+
+	// managed list of programs to open from tray menu
+	std::vector<CString> m_programs;
+	void LoadProgramsFromSettings();
+	void SaveProgramsToSettings();
+	// delete / rename handlers for program items
+	afx_msg void OnDeleteProgramSelected(UINT nID);
+	afx_msg void OnRenameProgramSelected(UINT nID);
+
 	void AddTrayIcon();
 	void RemoveTrayIcon();
 	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 	afx_msg LRESULT OnTrayIcon(WPARAM wParam, LPARAM lParam);
   afx_msg void OnToggleStartup();
+    afx_msg void OnAddProgram();
+	afx_msg void OnOpenProgram(UINT nID);
 	afx_msg void OnMenuHideTray();
 	afx_msg void OnMenuRestore();
 	afx_msg void OnMenuExit();

@@ -12,12 +12,158 @@
 using namespace Gdiplus;
 #include <cstdlib>
 #include <ctime>
+#include <string>
 // for CreateStreamOnHGlobal / IStream
 #include <objidl.h>
 #include <vector>
 #include <deque>
 #include <utility>
 #include <shellapi.h>
+#include <shobjidl.h>
+
+// PromptForText: create a standard modal dialog (built from DLGTEMPLATE in memory)
+struct InputDlgParam { HWND owner; CString title; CString prompt; CString init; CString result; BOOL ok; };
+
+static INT_PTR CALLBACK QieInputDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	InputDlgParam* p = (InputDlgParam*)GetWindowLongPtr(hDlg, DWLP_USER);
+	switch (message)
+	{
+	case WM_INITDIALOG:
+		p = (InputDlgParam*)lParam;
+		SetWindowLongPtr(hDlg, DWLP_USER, lParam);
+		// set texts
+		SetWindowTextW(hDlg, (LPCWSTR)p->title);
+		SetDlgItemTextW(hDlg, 100, (LPCWSTR)p->prompt);
+		SetDlgItemTextW(hDlg, 101, (LPCWSTR)p->init);
+		// center over owner
+		if (p->owner)
+		{
+			RECT rcOwner; GetWindowRect(p->owner, &rcOwner);
+			RECT rc; GetWindowRect(hDlg, &rc);
+			int x = (rcOwner.left + rcOwner.right - (rc.right-rc.left)) / 2;
+			int y = (rcOwner.top + rcOwner.bottom - (rc.bottom-rc.top)) / 2;
+			SetWindowPos(hDlg, NULL, x, y, 0, 0, SWP_NOZORDER|SWP_NOSIZE);
+		}
+		return TRUE;
+	case WM_COMMAND:
+		if (LOWORD(wParam) == IDOK)
+		{
+			wchar_t buf[1024];
+			GetDlgItemTextW(hDlg, 101, buf, _countof(buf));
+			InputDlgParam* pp = (InputDlgParam*)GetWindowLongPtr(hDlg, DWLP_USER);
+			pp->result = buf;
+			pp->ok = TRUE;
+			EndDialog(hDlg, IDOK);
+			return TRUE;
+		}
+		else if (LOWORD(wParam) == IDCANCEL)
+		{
+			InputDlgParam* pp = (InputDlgParam*)GetWindowLongPtr(hDlg, DWLP_USER);
+			pp->ok = FALSE;
+			EndDialog(hDlg, IDCANCEL);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+static bool PromptForText(HWND owner, const CString& title, const CString& prompt, const CString& init, CString& out)
+{
+	// build a simple dialog template in memory
+	const int DLG_W = 380, DLG_H = 140;
+	// Allocate buffer
+	const int BUF_SIZE = 1024;
+	std::vector<BYTE> buf(BUF_SIZE);
+	BYTE* p = buf.data();
+	// align helper
+	auto align = [&](size_t a){ size_t off = (size_t)(p - buf.data()); size_t need = (a - (off % a)) % a; for (size_t i=0;i<need;i++) *p++ = 0; };
+
+	// DLGTEMPLATE
+	align(4);
+	DLGTEMPLATE* dt = (DLGTEMPLATE*)p; p += sizeof(DLGTEMPLATE);
+	dt->style = DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | DS_MODALFRAME;
+	dt->dwExtendedStyle = 0;
+	dt->cdit = 4; // static, edit, ok, cancel
+	dt->x = 0; dt->y = 0; dt->cx = DLG_W; dt->cy = DLG_H;
+	// no menu
+	*((WORD*)p) = 0; p += sizeof(WORD);
+	// default window class
+	*((WORD*)p) = 0; p += sizeof(WORD);
+	// title
+	size_t tlen = (title.GetLength()+1);
+	memcpy(p, title.GetString(), tlen * sizeof(wchar_t)); p += tlen * sizeof(wchar_t);
+	// font
+	*((WORD*)p) = 8; p += sizeof(WORD);
+	// now DLGITEMTEMPLATEs
+	// control 1: STATIC (prompt) id 100
+	align(4);
+	DLGITEMTEMPLATE* it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
+	it->style = WS_CHILD | WS_VISIBLE | SS_LEFT;
+	it->dwExtendedStyle = 0;
+	it->x = 8; it->y = 8; it->cx = DLG_W - 16; it->cy = 20;
+	it->id = 100;
+	// class: STATIC
+	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0082; p += sizeof(WORD); // 0x0082 = STATIC
+	// title (prompt)
+	size_t plen = (prompt.GetLength()+1);
+	memcpy(p, prompt.GetString(), plen * sizeof(wchar_t)); p += plen * sizeof(wchar_t);
+	*((WORD*)p) = 0; p += sizeof(WORD);
+
+	// control 2: EDIT (id 101)
+	align(4);
+	it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
+	it->style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT | ES_AUTOHSCROLL;
+	it->dwExtendedStyle = 0;
+	it->x = 8; it->y = 34; it->cx = DLG_W - 16; it->cy = 22;
+	it->id = 101;
+	// class: EDIT
+	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0081; p += sizeof(WORD); // 0x0081 = EDIT
+	// no title text
+	*((WORD*)p) = 0; p += sizeof(WORD);
+	*((WORD*)p) = 0; p += sizeof(WORD);
+
+	// control 3: OK button id IDOK
+	align(4);
+	it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
+	it->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
+	it->dwExtendedStyle = 0;
+	it->x = DLG_W/2 - 80; it->y = DLG_H - 44; it->cx = 70; it->cy = 24;
+	it->id = IDOK;
+	// class: BUTTON
+	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0080; p += sizeof(WORD); // 0x0080 = BUTTON
+	// title
+	const wchar_t* okText = L"确定";
+	memcpy(p, okText, (wcslen(okText)+1)*sizeof(wchar_t)); p += (wcslen(okText)+1)*sizeof(wchar_t);
+	*((WORD*)p) = 0; p += sizeof(WORD);
+
+	// control 4: Cancel button id IDCANCEL
+	align(4);
+	it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
+	it->style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
+	it->dwExtendedStyle = 0;
+	it->x = DLG_W/2 + 10; it->y = DLG_H - 44; it->cx = 70; it->cy = 24;
+	it->id = IDCANCEL;
+	// class: BUTTON
+	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0080; p += sizeof(WORD);
+	const wchar_t* cancelText = L"取消";
+	memcpy(p, cancelText, (wcslen(cancelText)+1)*sizeof(wchar_t)); p += (wcslen(cancelText)+1)*sizeof(wchar_t);
+	*((WORD*)p) = 0; p += sizeof(WORD);
+
+	// prepare param
+	InputDlgParam param = {}; param.owner = owner; param.title = title; param.prompt = prompt; param.init = init; param.ok = FALSE;
+
+	BOOL rc = FALSE;
+	INT_PTR res = DialogBoxIndirectParamW(AfxGetInstanceHandle(), (LPCDLGTEMPLATEW)buf.data(), owner, QieInputDlgProc, (LPARAM)&param);
+	if (res == IDOK)
+	{
+		out = param.result;
+		return true;
+	}
+	return false;
+}
+
 
 // target maximum display dimension for skins (shrink-to)
 #define SKIN_DISPLAY_MAX 150
@@ -51,6 +197,222 @@ protected:
 
 CAboutDlg::CAboutDlg() : CDialogEx(IDD_ABOUTBOX)
 {
+}
+
+void CqieDlg::OnDeleteProgramSelected(UINT nID)
+{
+	int idx = nID - IDC_PROG_DELETE_BASE;
+	LoadProgramsFromSettings();
+	if (idx < 0 || idx >= (int)m_programs.size()) return;
+	// confirm
+	CString msg;
+    // display friendly name if present
+	CString stored = m_programs[idx];
+	CString display = stored;
+	int sep = stored.Find(L"||");
+	if (sep >= 0)
+		display = stored.Left(sep);
+	else
+	{
+		// derive from path
+		display = stored;
+		if (!display.IsEmpty() && (display.Right(1) == L"\\" || display.Right(1) == L"/"))
+			display = display.Left(display.GetLength() - 1);
+		int pos = display.ReverseFind(L'\\');
+		if (pos < 0) pos = display.ReverseFind(L'/');
+		if (pos >= 0) display = display.Mid(pos + 1);
+	}
+	msg.Format(L"确定要删除 '%s' 吗？", (LPCWSTR)display);
+    if (MessageBoxW(msg, L"移除程序", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+	m_programs.erase(m_programs.begin() + idx);
+	SaveProgramsToSettings();
+}
+
+void CqieDlg::OnRenameProgramSelected(UINT nID)
+{
+	int idx = nID - IDC_PROG_RENAME_BASE;
+	LoadProgramsFromSettings();
+	if (idx < 0 || idx >= (int)m_programs.size()) return;
+    CString stored = m_programs[idx];
+	CString pathPart = stored;
+	CString label;
+	int sep = stored.Find(L"||");
+	if (sep >= 0)
+	{
+		label = stored.Left(sep);
+		pathPart = stored.Mid(sep + 2);
+	}
+    // prompt for new label
+	CString prompt = L"输入新的昵称：";
+	CString newLabel;
+	TRACE("OnRenameProgramSelected called nID=%u, idx=%d, programs=%d\n", nID, idx, (int)m_programs.size());
+	// Use NULL owner for the modal input dialog to avoid issues with layered/topmost
+	// windows preventing the dialog from appearing in some cases.
+	if (!PromptForText(NULL, L"修改昵称", prompt, label.IsEmpty() ? pathPart : label, newLabel)) { TRACE("PromptForText returned false\n"); return; }
+	newLabel.Trim();
+	if (newLabel.IsEmpty()) return;
+	// store as label||path to preserve both
+	CString combined = newLabel + L"||" + pathPart;
+	m_programs[idx] = combined;
+	SaveProgramsToSettings();
+}
+
+void CqieDlg::LoadProgramsFromSettings()
+{
+	m_programs.clear();
+	if (m_settingsPath.IsEmpty()) return;
+	WCHAR buf[4096];
+	// programs are stored under [Programs] as indexed keys 0..N-1
+	for (int i = 0; i < 100; ++i)
+	{
+		WCHAR key[32]; swprintf_s(key, L"%d", i);
+		DWORD n = GetPrivateProfileStringW(L"Programs", key, L"", buf, _countof(buf), m_settingsPath);
+		if (n == 0) break;
+		m_programs.push_back(CString(buf));
+	}
+}
+
+void CqieDlg::SaveProgramsToSettings()
+{
+	if (m_settingsPath.IsEmpty()) return;
+	// clear section first
+	WritePrivateProfileSectionW(L"Programs", L"", m_settingsPath);
+	for (size_t i = 0; i < m_programs.size(); ++i)
+	{
+		WCHAR key[32]; swprintf_s(key, L"%d", (int)i);
+		WritePrivateProfileStringW(L"Programs", key, m_programs[i], m_settingsPath);
+	}
+}
+
+void CqieDlg::OnAddProgram()
+{
+    // Ask whether to add File or Folder
+	int r = MessageBoxW(L"添加文件还是文件夹？\nYes = 文件, No = 文件夹", L"添加程序", MB_YESNOCANCEL | MB_ICONQUESTION);
+	if (r == IDCANCEL) return;
+
+	CString chosen;
+	if (r == IDYES)
+	{
+		// file picker
+		WCHAR file[MAX_PATH] = {0};
+		OPENFILENAMEW ofn = {0};
+		ofn.lStructSize = sizeof(ofn);
+		ofn.hwndOwner = m_hWnd;
+		ofn.lpstrFile = file;
+		ofn.nMaxFile = MAX_PATH;
+		ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+		ofn.lpstrFilter = L"All\0*.*\0Executables\0*.exe\0\0";
+		if (!GetOpenFileNameW(&ofn)) return;
+		chosen = file;
+	}
+	else
+	{
+		// folder picker using IFileDialog
+		HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+		bool coInit = SUCCEEDED(hr);
+		IFileDialog *pfd = NULL;
+		if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd))))
+		{
+			DWORD opts;
+			if (SUCCEEDED(pfd->GetOptions(&opts)))
+			{
+				pfd->SetOptions(opts | FOS_PICKFOLDERS);
+			}
+			if (SUCCEEDED(pfd->Show(m_hWnd)))
+			{
+				IShellItem *psi = NULL;
+				if (SUCCEEDED(pfd->GetResult(&psi)) && psi)
+				{
+					PWSTR pszPath = NULL;
+					if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath)) && pszPath)
+					{
+						chosen = pszPath;
+						CoTaskMemFree(pszPath);
+					}
+					psi->Release();
+				}
+			}
+			pfd->Release();
+		}
+		if (coInit) CoUninitialize();
+		if (chosen.IsEmpty()) return;
+	}
+
+	// normalize chosen path
+	WCHAR full[MAX_PATH];
+	if (GetFullPathNameW((LPCWSTR)chosen, MAX_PATH, full, NULL) == 0) return;
+	CString finalPath(full);
+	// remove trailing backslash for directories
+	if (finalPath.GetLength() > 1 && (finalPath.Right(1) == L"\\" || finalPath.Right(1) == L"/"))
+		finalPath = finalPath.Left(finalPath.GetLength() - 1);
+
+	// check duplicates
+	LoadProgramsFromSettings();
+	for (auto &p : m_programs)
+	{
+		CString pp = p;
+		// normalize stored path similarly
+		WCHAR f2[MAX_PATH];
+		if (GetFullPathNameW((LPCWSTR)pp, MAX_PATH, f2, NULL) != 0)
+		{
+			CString stored(f2);
+			if (stored.GetLength() > 1 && (stored.Right(1) == L"\\" || stored.Right(1) == L"/"))
+				stored = stored.Left(stored.GetLength() - 1);
+			if (stored.CompareNoCase(finalPath) == 0) return; // duplicate
+		}
+		else if (pp.CompareNoCase(finalPath) == 0) return;
+	}
+
+	m_programs.push_back(finalPath);
+	SaveProgramsToSettings();
+}
+
+void CqieDlg::OnOpenProgram(UINT nID)
+{
+	int idx = nID - IDC_PROG_OPEN_BASE;
+	LoadProgramsFromSettings();
+	if (idx < 0 || idx >= (int)m_programs.size()) return;
+    CString stored = m_programs[idx];
+	CString path = stored;
+	int sep = stored.Find(L"||");
+	if (sep >= 0)
+		path = stored.Mid(sep + 2);
+	// open file or directory
+	SHELLEXECUTEINFOW sei = {0};
+	sei.cbSize = sizeof(sei);
+	sei.fMask = SEE_MASK_NOASYNC;
+	sei.hwnd = m_hWnd;
+	sei.lpVerb = L"open";
+	sei.lpFile = path;
+	sei.nShow = SW_SHOWNORMAL;
+	ShellExecuteExW(&sei);
+}
+
+void CqieDlg::LoadSettings()
+{
+	// default: nothing yet; create file with defaults if missing
+	if (m_settingsPath.IsEmpty()) return;
+	DWORD attrs = GetFileAttributesW(m_settingsPath);
+	if (attrs == INVALID_FILE_ATTRIBUTES)
+	{
+		SaveDefaultSettings();
+		return;
+	}
+	// example: read skins dir override
+	WCHAR buf[MAX_PATH];
+	DWORD n = GetPrivateProfileStringW(L"Paths", L"SkinsDir", L"", buf, MAX_PATH, m_settingsPath);
+	if (n > 0)
+	{
+		m_skinsDir = CString(buf);
+	}
+}
+
+void CqieDlg::SaveDefaultSettings()
+{
+	if (m_settingsPath.IsEmpty()) return;
+	// write a minimal INI with current skins dir
+	WritePrivateProfileStringW(L"Paths", L"SkinsDir", m_skinsDir.IsEmpty() ? NULL : (LPCWSTR)m_skinsDir, m_settingsPath);
+	// add other defaults if needed
 }
 
 void CqieDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
@@ -297,6 +659,10 @@ BEGIN_MESSAGE_MAP(CqieDlg, CDialogEx)
   ON_COMMAND(IDC_EXE_EXIT, &CqieDlg::OnMenuExit)
     ON_COMMAND(IDC_SKIN_RANDOM, &CqieDlg::OnSkinRandom)
     ON_COMMAND(IDC_STARTUP_TOGGLE, &CqieDlg::OnToggleStartup)
+    ON_COMMAND(40100, &CqieDlg::OnAddProgram)
+ ON_COMMAND_RANGE(IDC_PROG_OPEN_BASE, IDC_PROG_OPEN_BASE+1000, &CqieDlg::OnOpenProgram)
+ ON_COMMAND_RANGE(IDC_PROG_DELETE_BASE, IDC_PROG_DELETE_BASE+1000, &CqieDlg::OnDeleteProgramSelected)
+	ON_COMMAND_RANGE(IDC_PROG_RENAME_BASE, IDC_PROG_RENAME_BASE+1000, &CqieDlg::OnRenameProgramSelected)
 	ON_COMMAND_RANGE(IDC_SKIN_BASE, IDC_SKIN_BASE+1000, &CqieDlg::OnSkinChange)
 END_MESSAGE_MAP()
 
@@ -334,6 +700,10 @@ BOOL CqieDlg::OnInitDialog()
 		int pos = exePath.ReverseFind(L'\\');
 		CString exeDir = exePath.Left(pos);
          m_skinsDir = exeDir + L"\\skins";
+
+		// settings.ini path
+		m_settingsPath = exeDir + L"\\settings.ini";
+		LoadSettings();
 		WIN32_FIND_DATA fd;
         CString pattern = m_skinsDir + L"\\*.png";
 		HANDLE h = FindFirstFile(pattern, &fd);
@@ -757,6 +1127,50 @@ void CqieDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		menu.AppendMenu(MF_STRING, IDC_SKIN_RANDOM, L"换肤");
 	}
 
+	// Programs submenu
+	CMenu progMenu;
+	progMenu.CreatePopupMenu();
+	// add existing programs from settings
+	LoadProgramsFromSettings();
+  for (size_t i = 0; i < m_programs.size(); ++i)
+	{
+		CString stored = m_programs[i];
+		CString label;
+		CString pathPart = stored;
+		int sep = stored.Find(L"||");
+		if (sep >= 0)
+		{
+			label = stored.Left(sep);
+			pathPart = stored.Mid(sep + 2);
+		}
+		if (label.IsEmpty())
+		{
+			// derive label from path
+			CString display = pathPart;
+			if (!display.IsEmpty() && (display.Right(1) == L"\\" || display.Right(1) == L"/"))
+				display = display.Left(display.GetLength() - 1);
+			int pos = display.ReverseFind(L'\\');
+			if (pos < 0) pos = display.ReverseFind(L'/');
+			if (pos >= 0)
+				display = display.Mid(pos + 1);
+			label = display;
+		}
+
+        // create submenu for this program: Open / Modify Nickname / Remove
+		CMenu itemSub;
+		itemSub.CreatePopupMenu();
+        itemSub.AppendMenu(MF_STRING, IDC_PROG_OPEN_BASE + (UINT)i, L"打开");
+		itemSub.AppendMenu(MF_STRING, IDC_PROG_RENAME_BASE + (UINT)i, L"修改昵称");
+		itemSub.AppendMenu(MF_STRING, IDC_PROG_DELETE_BASE + (UINT)i, L"移除");
+        // attach submenu under the program label (prefix index to avoid ambiguous first-item behavior)
+       CString displayLabel = label;
+		progMenu.AppendMenu(MF_POPUP, (UINT_PTR)itemSub.Detach(), displayLabel);
+	}
+	// add separator and Add... entry
+	progMenu.AppendMenu(MF_SEPARATOR);
+	progMenu.AppendMenu(MF_STRING, 40100, L"添加...");
+	menu.AppendMenu(MF_POPUP, (UINT_PTR)progMenu.Detach(), L"打开");
+
 	// startup toggle
 	BOOL autoRun = FALSE;
 	HKEY hKey = NULL;
@@ -781,8 +1195,23 @@ void CqieDlg::OnRButtonUp(UINT nFlags, CPoint point)
 
 	CPoint screenPt;
 	GetCursorPos(&screenPt);
-	SetForegroundWindow();
-	menu.TrackPopupMenu(TPM_RIGHTBUTTON, screenPt.x, screenPt.y, this);
+    SetForegroundWindow();
+	// use TrackPopupMenu with TPM_RETURNCMD to get selected command directly
+	HMENU hMenu = menu.GetSafeHmenu();
+	UINT cmd = ::TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, screenPt.x, screenPt.y, 0, m_hWnd, NULL);
+	if (cmd != 0)
+	{
+		// dispatch known commands
+		if (cmd == IDC_TRAY_HIDE) OnMenuHideTray();
+		else if (cmd == IDC_SKIN_RANDOM) OnSkinRandom();
+		else if (cmd >= IDC_PROG_OPEN_BASE && cmd < IDC_PROG_OPEN_BASE + 1000) OnOpenProgram(cmd);
+		else if (cmd >= IDC_PROG_RENAME_BASE && cmd < IDC_PROG_RENAME_BASE + 1000) OnRenameProgramSelected(cmd);
+		else if (cmd >= IDC_PROG_DELETE_BASE && cmd < IDC_PROG_DELETE_BASE + 1000) OnDeleteProgramSelected(cmd);
+		else if (cmd == 40100) OnAddProgram();
+		else if (cmd == 40010) OnToggleStartup();
+		else if (cmd == IDC_EXE_EXIT) OnMenuExit();
+		// other commands ignored
+	}
 
 	CDialogEx::OnRButtonUp(nFlags, point);
 }
