@@ -71,8 +71,9 @@ static INT_PTR CALLBACK QieInputDlgProc(HWND hDlg, UINT message, WPARAM wParam, 
 
 static bool PromptForText(HWND owner, const CString& title, const CString& prompt, const CString& init, CString& out)
 {
-	// build a simple dialog template in memory
-	const int DLG_W = 380, DLG_H = 140;
+// build a simple dialog template in memory
+// make the prompt dialog smaller so it doesn't appear too large
+const int DLG_W = 320, DLG_H = 110;
 	// Allocate buffer
 	const int BUF_SIZE = 1024;
 	std::vector<BYTE> buf(BUF_SIZE);
@@ -102,7 +103,7 @@ static bool PromptForText(HWND owner, const CString& title, const CString& promp
 	DLGITEMTEMPLATE* it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
 	it->style = WS_CHILD | WS_VISIBLE | SS_LEFT;
 	it->dwExtendedStyle = 0;
-	it->x = 8; it->y = 8; it->cx = DLG_W - 16; it->cy = 20;
+    it->x = 8; it->y = 8; it->cx = DLG_W - 16; it->cy = 18;
 	it->id = 100;
 	// class: STATIC
 	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0082; p += sizeof(WORD); // 0x0082 = STATIC
@@ -116,7 +117,7 @@ static bool PromptForText(HWND owner, const CString& title, const CString& promp
 	it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
 	it->style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT | ES_AUTOHSCROLL;
 	it->dwExtendedStyle = 0;
-	it->x = 8; it->y = 34; it->cx = DLG_W - 16; it->cy = 22;
+    it->x = 8; it->y = 30; it->cx = DLG_W - 16; it->cy = 20;
 	it->id = 101;
 	// class: EDIT
 	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0081; p += sizeof(WORD); // 0x0081 = EDIT
@@ -129,7 +130,7 @@ static bool PromptForText(HWND owner, const CString& title, const CString& promp
 	it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
 	it->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
 	it->dwExtendedStyle = 0;
-	it->x = DLG_W/2 - 80; it->y = DLG_H - 44; it->cx = 70; it->cy = 24;
+    it->x = DLG_W/2 - 72; it->y = DLG_H - 36; it->cx = 64; it->cy = 22;
 	it->id = IDOK;
 	// class: BUTTON
 	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0080; p += sizeof(WORD); // 0x0080 = BUTTON
@@ -143,7 +144,7 @@ static bool PromptForText(HWND owner, const CString& title, const CString& promp
 	it = (DLGITEMTEMPLATE*)p; p += sizeof(DLGITEMTEMPLATE);
 	it->style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
 	it->dwExtendedStyle = 0;
-	it->x = DLG_W/2 + 10; it->y = DLG_H - 44; it->cx = 70; it->cy = 24;
+    it->x = DLG_W/2 + 8; it->y = DLG_H - 36; it->cx = 64; it->cy = 22;
 	it->id = IDCANCEL;
 	// class: BUTTON
 	*((WORD*)p) = 0xFFFF; p += sizeof(WORD); *((WORD*)p) = 0x0080; p += sizeof(WORD);
