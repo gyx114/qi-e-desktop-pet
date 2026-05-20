@@ -1401,3 +1401,8 @@ HCURSOR CqieDlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
+void CqieDlg::OnOK()
+{
+	// Suppress default Enter key behavior to avoid closing the dialog.
+}
+

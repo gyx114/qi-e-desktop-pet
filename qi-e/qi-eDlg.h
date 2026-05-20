@@ -130,5 +130,6 @@ protected:
     afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnDestroy();
+   virtual void OnOK();
 	DECLARE_MESSAGE_MAP()
 };
