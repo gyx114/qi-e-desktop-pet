@@ -595,6 +595,8 @@ void CqieDlg::LoadSkinFromFile(const CString& path)
 		m_imgHeight = max(1, (int)floor(origH * scale + 0.5));
 		SetWindowPos(nullptr, 0,0, m_imgWidth, m_imgHeight, SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
 		ShowLayered();
+		// 换肤后重新确保置顶
+		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	}
 }
 
@@ -818,6 +820,8 @@ BOOL CqieDlg::OnInitDialog()
 						int posY = max(0, (scrH - m_imgHeight) / 2);
 						SetWindowPos(nullptr, posX, posY, m_imgWidth, m_imgHeight, SWP_NOZORDER | SWP_NOACTIVATE);
 						ShowLayered();
+						// 重新确保置顶（UpdateLayeredWindow 会重置 Z 序）
+						::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 					}
 				}
 				pStream->Release();
@@ -1291,6 +1295,8 @@ void CqieDlg::OnMenuRestore()
 	RemoveTrayIcon();
 	ShowWindow(SW_SHOW);
 	SetForegroundWindow();
+	// 从托盘恢复时重新置顶
+	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void CqieDlg::OnMenuExit()
@@ -1349,6 +1355,8 @@ void CqieDlg::OnSkinChange(UINT nID)
 		m_imgHeight = max(1, (int)floor(origH * scale + 0.5));
 		SetWindowPos(nullptr, 0,0, m_imgWidth, m_imgHeight, SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
 		ShowLayered();
+		// 换肤后重新确保置顶
+		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	}
 }
 
