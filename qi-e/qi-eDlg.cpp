@@ -399,9 +399,26 @@ void CqieDlg::LoadSettings()
 		SaveDefaultSettings();
 		return;
 	}
-	// example: read skins dir override
+	// read target window title and path for double-click hotkey wake-up
 	WCHAR buf[MAX_PATH];
-	DWORD n = GetPrivateProfileStringW(L"Paths", L"SkinsDir", L"", buf, MAX_PATH, m_settingsPath);
+	DWORD n = GetPrivateProfileStringW(L"Target", L"WindowTitle", L"", buf, MAX_PATH, m_settingsPath);
+	if (n > 0)
+	{
+		m_targetTitle = CString(buf);
+	}
+	n = GetPrivateProfileStringW(L"Target", L"Path", L"", buf, MAX_PATH, m_settingsPath);
+	if (n > 0)
+	{
+		m_targetPath = CString(buf);
+	}
+	// if [Target] section is missing, write defaults so user can fill in
+	if (m_targetTitle.IsEmpty())
+	{
+		WritePrivateProfileStringW(L"Target", L"WindowTitle", L"(ctrl+alt+空格唤起此窗口)", m_settingsPath);
+		WritePrivateProfileStringW(L"Target", L"Path", L"", m_settingsPath);
+	}
+	// read skins dir override
+	n = GetPrivateProfileStringW(L"Paths", L"SkinsDir", L"", buf, MAX_PATH, m_settingsPath);
 	if (n > 0)
 	{
 		m_skinsDir = CString(buf);
@@ -411,19 +428,71 @@ void CqieDlg::LoadSettings()
 void CqieDlg::SaveDefaultSettings()
 {
 	if (m_settingsPath.IsEmpty()) return;
+	// write default target entries (empty Path for user to fill in)
+	WritePrivateProfileStringW(L"Target", L"WindowTitle", L"(ctrl+alt+空格唤起此窗口)", m_settingsPath);
+	WritePrivateProfileStringW(L"Target", L"Path", L"", m_settingsPath);
 	// write a minimal INI with current skins dir
 	WritePrivateProfileStringW(L"Paths", L"SkinsDir", m_skinsDir.IsEmpty() ? NULL : (LPCWSTR)m_skinsDir, m_settingsPath);
 	// add other defaults if needed
 }
 
+// Context for EnumWindows callback to find a window by process path
+struct FindByPathCtx { const CString* path; HWND result; };
+
+static BOOL CALLBACK FindWindowByPathProc(HWND hWnd, LPARAM lParam)
+{
+	auto* ctx = reinterpret_cast<FindByPathCtx*>(lParam);
+	if (ctx->result) return FALSE; // already found
+	DWORD pid;
+	GetWindowThreadProcessId(hWnd, &pid);
+	if (!pid) return TRUE;
+	HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+	if (!hProc) return TRUE;
+	WCHAR path[MAX_PATH];
+	DWORD len = MAX_PATH;
+	if (QueryFullProcessImageNameW(hProc, 0, path, &len))
+	{
+		if (_wcsicmp(path, *ctx->path) == 0)
+		{
+			ctx->result = hWnd;
+			CloseHandle(hProc);
+			return FALSE; // stop enumeration
+		}
+	}
+	CloseHandle(hProc);
+	return TRUE;
+}
+
 void CqieDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
-	// Post WM_HOTKEY to the toolbox window to simulate Ctrl+Alt+Space
-	// This bypasses keyboard simulation entirely, so no keys can get stuck
-	HWND hToolbox = ::FindWindow(nullptr, _T("MFCApplication1 (ctrl+alt+空格唤起此窗口)"));
+	// Post WM_HOTKEY to the target window (by title or by process path)
+	// This bypasses keyboard simulation entirely, so no keys can get stuck.
+	// Priority: 1) FindWindow by title  2) EnumWindows by process path  3) ShellExecute launch
+	HWND hToolbox = nullptr;
+
+	// Step 1: try finding by window title
+	if (!m_targetTitle.IsEmpty())
+	{
+		hToolbox = ::FindWindow(nullptr, m_targetTitle);
+	}
+
+	// Step 2: if not found by title, try finding by process path
+	if (!hToolbox && !m_targetPath.IsEmpty())
+	{
+		FindByPathCtx ctx = { &m_targetPath, nullptr };
+		::EnumWindows(FindWindowByPathProc, reinterpret_cast<LPARAM>(&ctx));
+		hToolbox = ctx.result;
+	}
+
+	// Step 3: post WM_HOTKEY if window found, otherwise launch the program
 	if (hToolbox)
 	{
 		::PostMessage(hToolbox, WM_HOTKEY, 1001, 0);
+	}
+	else if (!m_targetPath.IsEmpty())
+	{
+		// window not found, try launching the program
+		ShellExecuteW(nullptr, L"open", m_targetPath, nullptr, nullptr, SW_SHOWNORMAL);
 	}
 
 	CDialogEx::OnLButtonDblClk(nFlags, point);

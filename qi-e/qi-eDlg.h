@@ -76,6 +76,10 @@ protected:
 	// path to settings INI in exe dir
 	CString m_settingsPath;
 
+	// target window title and path for double-click hotkey wake-up
+	CString m_targetTitle;
+	CString m_targetPath;
+
 	// load/save settings.ini in exe directory
 	void LoadSettings();
 	void SaveDefaultSettings();
