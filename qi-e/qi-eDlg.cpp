@@ -399,24 +399,8 @@ void CqieDlg::LoadSettings()
 		SaveDefaultSettings();
 		return;
 	}
-	// read target window title and path for double-click hotkey wake-up
 	WCHAR buf[MAX_PATH];
-	DWORD n = GetPrivateProfileStringW(L"Target", L"WindowTitle", L"", buf, MAX_PATH, m_settingsPath);
-	if (n > 0)
-	{
-		m_targetTitle = CString(buf);
-	}
-	n = GetPrivateProfileStringW(L"Target", L"Path", L"", buf, MAX_PATH, m_settingsPath);
-	if (n > 0)
-	{
-		m_targetPath = CString(buf);
-	}
-	// if [Target] section is missing, write defaults so user can fill in
-	if (m_targetTitle.IsEmpty())
-	{
-		WritePrivateProfileStringW(L"Target", L"WindowTitle", L"(ctrl+alt+空格唤起此窗口)", m_settingsPath);
-		WritePrivateProfileStringW(L"Target", L"Path", L"", m_settingsPath);
-	}
+	DWORD n;
 	// read skins dir override
 	n = GetPrivateProfileStringW(L"Paths", L"SkinsDir", L"", buf, MAX_PATH, m_settingsPath);
 	if (n > 0)
@@ -428,72 +412,47 @@ void CqieDlg::LoadSettings()
 void CqieDlg::SaveDefaultSettings()
 {
 	if (m_settingsPath.IsEmpty()) return;
-	// write default target entries (empty Path for user to fill in)
-	WritePrivateProfileStringW(L"Target", L"WindowTitle", L"(ctrl+alt+空格唤起此窗口)", m_settingsPath);
-	WritePrivateProfileStringW(L"Target", L"Path", L"", m_settingsPath);
 	// write a minimal INI with current skins dir
 	WritePrivateProfileStringW(L"Paths", L"SkinsDir", m_skinsDir.IsEmpty() ? NULL : (LPCWSTR)m_skinsDir, m_settingsPath);
 	// add other defaults if needed
 }
 
-// Context for EnumWindows callback to find a window by process path
-struct FindByPathCtx { const CString* path; HWND result; };
-
-static BOOL CALLBACK FindWindowByPathProc(HWND hWnd, LPARAM lParam)
-{
-	auto* ctx = reinterpret_cast<FindByPathCtx*>(lParam);
-	if (ctx->result) return FALSE; // already found
-	DWORD pid;
-	GetWindowThreadProcessId(hWnd, &pid);
-	if (!pid) return TRUE;
-	HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-	if (!hProc) return TRUE;
-	WCHAR path[MAX_PATH];
-	DWORD len = MAX_PATH;
-	if (QueryFullProcessImageNameW(hProc, 0, path, &len))
-	{
-		if (_wcsicmp(path, *ctx->path) == 0)
-		{
-			ctx->result = hWnd;
-			CloseHandle(hProc);
-			return FALSE; // stop enumeration
-		}
-	}
-	CloseHandle(hProc);
-	return TRUE;
-}
-
 void CqieDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
-	// Post WM_HOTKEY to the target window (by title or by process path)
-	// This bypasses keyboard simulation entirely, so no keys can get stuck.
-	// Priority: 1) FindWindow by title  2) EnumWindows by process path  3) ShellExecute launch
-	HWND hToolbox = nullptr;
+	// Simulate Ctrl+Alt+Space via SendInput to trigger the toolbox hotkey.
+	// The toolbox registers: RegisterHotKey(m_hWnd, 1001, MOD_CONTROL | MOD_ALT, VK_SPACE)
+	// The toolbox's OnHotKey handler calls ForceReleaseModifierKeys() to clean up any stuck keys.
+	// Key-down and key-up events are paired atomically in a single SendInput batch.
+	INPUT inputs[6] = {};
 
-	// Step 1: try finding by window title
-	if (!m_targetTitle.IsEmpty())
-	{
-		hToolbox = ::FindWindow(nullptr, m_targetTitle);
-	}
+	// Press Ctrl
+	inputs[0].type = INPUT_KEYBOARD;
+	inputs[0].ki.wVk = VK_CONTROL;
 
-	// Step 2: if not found by title, try finding by process path
-	if (!hToolbox && !m_targetPath.IsEmpty())
-	{
-		FindByPathCtx ctx = { &m_targetPath, nullptr };
-		::EnumWindows(FindWindowByPathProc, reinterpret_cast<LPARAM>(&ctx));
-		hToolbox = ctx.result;
-	}
+	// Press Alt
+	inputs[1].type = INPUT_KEYBOARD;
+	inputs[1].ki.wVk = VK_MENU;
 
-	// Step 3: post WM_HOTKEY if window found, otherwise launch the program
-	if (hToolbox)
-	{
-		::PostMessage(hToolbox, WM_HOTKEY, 1001, 0);
-	}
-	else if (!m_targetPath.IsEmpty())
-	{
-		// window not found, try launching the program
-		ShellExecuteW(nullptr, L"open", m_targetPath, nullptr, nullptr, SW_SHOWNORMAL);
-	}
+	// Press Space
+	inputs[2].type = INPUT_KEYBOARD;
+	inputs[2].ki.wVk = VK_SPACE;
+
+	// Release Space
+	inputs[3].type = INPUT_KEYBOARD;
+	inputs[3].ki.wVk = VK_SPACE;
+	inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+
+	// Release Alt
+	inputs[4].type = INPUT_KEYBOARD;
+	inputs[4].ki.wVk = VK_MENU;
+	inputs[4].ki.dwFlags = KEYEVENTF_KEYUP;
+
+	// Release Ctrl
+	inputs[5].type = INPUT_KEYBOARD;
+	inputs[5].ki.wVk = VK_CONTROL;
+	inputs[5].ki.dwFlags = KEYEVENTF_KEYUP;
+
+	::SendInput(6, inputs, sizeof(INPUT));
 
 	CDialogEx::OnLButtonDblClk(nFlags, point);
 }
