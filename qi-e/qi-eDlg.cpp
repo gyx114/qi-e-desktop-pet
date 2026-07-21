@@ -418,38 +418,13 @@ void CqieDlg::SaveDefaultSettings()
 
 void CqieDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
-	// simulate Ctrl+Alt+Space
-	// send input sequence: keydown Ctrl, keydown Alt, keydown Space, keyup Space, keyup Alt, keyup Ctrl
-	// KEYEVENTF_EXTENDEDKEY is required for Alt (and right Ctrl) to ensure
-	// proper keydown/keyup matching; without it the modifier keys may get "stuck"
-	INPUT inputs[6];
-	ZeroMemory(inputs, sizeof(inputs));
-	// Ctrl down
-	inputs[0].type = INPUT_KEYBOARD;
-	inputs[0].ki.wVk = VK_CONTROL;
-	inputs[0].ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
-	// Alt down
-	inputs[1].type = INPUT_KEYBOARD;
-	inputs[1].ki.wVk = VK_MENU;
-	inputs[1].ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
-	// Space down
-	inputs[2].type = INPUT_KEYBOARD;
-	inputs[2].ki.wVk = VK_SPACE;
-	// Space up
-	inputs[3].type = INPUT_KEYBOARD;
-	inputs[3].ki.wVk = VK_SPACE;
-	inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-	// Alt up
-	inputs[4].type = INPUT_KEYBOARD;
-	inputs[4].ki.wVk = VK_MENU;
-	inputs[4].ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY;
-	// Ctrl up
-	inputs[5].type = INPUT_KEYBOARD;
-	inputs[5].ki.wVk = VK_CONTROL;
-	inputs[5].ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY;
-
-	// send
-	SendInput(_countof(inputs), inputs, sizeof(INPUT));
+	// Post WM_HOTKEY to the toolbox window to simulate Ctrl+Alt+Space
+	// This bypasses keyboard simulation entirely, so no keys can get stuck
+	HWND hToolbox = ::FindWindow(nullptr, _T("MFCApplication1 (ctrl+alt+空格唤起此窗口)"));
+	if (hToolbox)
+	{
+		::PostMessage(hToolbox, WM_HOTKEY, 1001, 0);
+	}
 
 	CDialogEx::OnLButtonDblClk(nFlags, point);
 }
